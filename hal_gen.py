@@ -131,3 +131,27 @@ class HALGenerator:
 
         with open(os.path.join(output_dir, "custom.hal"), "w") as f:
             f.write(self.generate_custom_hal())
+
+
+# ── External Controls HAL integration ─────────────────────────────────────────
+
+    def generate_external_controls_hal(self) -> str:
+        """Generate HAL snippet for all enabled external controls."""
+        from hal_generator.ext_controls_hal import ExternalControlsHAL
+        ext_gen = ExternalControlsHAL(
+            ext=self.cfg.external,
+            machine_name=self.cfg.machine_name,
+            axis_config=self.cfg.axis_config,
+        )
+        return ext_gen.generate_all()
+
+    def generate_machine_hal_full(self) -> str:
+        """
+        Extended version of generate_machine_hal() that appends
+        external controls HAL at the end.
+        """
+        base = self.generate_machine_hal()
+        ext  = self.generate_external_controls_hal()
+        if ext.strip():
+            return base + "\n\n# ═══ External Controls ═══\n" + ext
+        return base

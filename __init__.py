@@ -3,7 +3,8 @@ from .page_welcome import WelcomePage
 from .page_config_type import ConfigTypePage
 from .page_base_info import BaseMachineInfoPage
 from .page_screen_config import ScreenConfigPage
-from .page_vcp_ext_mesa import VCPPage, ExternalControlsPage, MesaConfigPage
+from .page_vcp_ext_mesa import VCPPage, MesaConfigPage
+from .page_external_controls import ExternalControlsPage   # ← full implementation
 from .page_connectors import ConnectorsPage
 from .page_motor_scale import IO7i76Page, MotorConfigPage, AxisScalePage
 from .page_axis_spindle_opts import (
