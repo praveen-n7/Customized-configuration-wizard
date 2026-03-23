@@ -10,6 +10,7 @@ try:
         QComboBox, QSpinBox, QDoubleSpinBox, QGroupBox, QCheckBox,
         QPushButton, QFileDialog, QFrame, QScrollArea, QWidget,
         QTabWidget, QRadioButton, QButtonGroup,
+        QTableWidget, QTableWidgetItem, QHeaderView,
     )
     from PyQt6.QtCore import Qt
 except ImportError:
@@ -18,6 +19,7 @@ except ImportError:
         QComboBox, QSpinBox, QDoubleSpinBox, QGroupBox, QCheckBox,
         QPushButton, QFileDialog, QFrame, QScrollArea, QWidget,
         QTabWidget, QRadioButton, QButtonGroup,
+        QTableWidget, QTableWidgetItem, QHeaderView,
     )
     from PySide6.QtCore import Qt
 
@@ -299,383 +301,404 @@ class VCPPage(BasePage):
                 break
 
 
+# NOTE: ExternalControlsPage lives in page_external_controls.py (full implementation).
+# The stub that was here has been removed. Do NOT re-add it here.
+
 # ─────────────────────────────────────────────────────────────────────────────
-# EXTERNAL CONTROLS PAGE
+# MESA CARD CONFIGURATION PAGE
 # ─────────────────────────────────────────────────────────────────────────────
 
-class ExternalControlsPage(BasePage):
-    PAGE_TITLE    = "External Controls"
-    PAGE_SUBTITLE = "Configure external jogging, MPG, VFD, and override devices"
+class MesaConfigPage(BasePage):
+    """
+    Mesa Card Configuration — Full Feature Parity with original PnCConf.
 
-    VFD_DRIVERS = ["gs2", "vfs11", "hy_vfd", "abb_badvfd", "smc_gs2"]
+    Sections:
+      Board Firmware     — board name + firmware file (dynamic, DB-driven)
+      Signal Frequencies — PWM base, PDM base, Watchdog timeout
+      Channel Counts     — Encoders, StepGens, PWMGens, Smart Serial
+                           All clamped to firmware limits on change
+      Smart Serial       — number of channels + device allocation table
+      Sanity Checks      — 7i29 / 7i30 / 7i33 / 7i40 / 7i48 daughter boards
+      Firmware Info      — read-only description of selected firmware
+    """
+
+    PAGE_TITLE    = "FPGA Configuration"
+    PAGE_SUBTITLE = "Configure Mesa FPGA board firmware and signal parameters"
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._build_ui()
 
+    # ─────────────────────────────────────────────────────────────────────────
+    # UI construction
+    # ─────────────────────────────────────────────────────────────────────────
+
     def _build_ui(self):
+        from config.machine_config import get_all_boards, get_firmware_list
+
         inner = QWidget()
         root = QVBoxLayout(inner)
         root.setContentsMargins(32, 24, 32, 24)
         root.setSpacing(16)
 
-        # Split layout: left panel (checkboxes) + right tab panel
-        h = QHBoxLayout()
-        h.setSpacing(16)
-        h.addWidget(self._build_left_panel(), stretch=0)
-        h.addWidget(self._build_right_tabs(), stretch=1)
-        root.addLayout(h)
-        root.addStretch()
-
-        outer = QVBoxLayout(self)
-        outer.setContentsMargins(0, 0, 0, 0)
-        outer.addWidget(_scroll_page(inner))
-
-    # ── Left panel — enable checkboxes ────────────────────────────────────────
-    def _build_left_panel(self) -> QGroupBox:
-        grp = QGroupBox("Enable Controls")
-        grp.setFixedWidth(220)
-        v = QVBoxLayout(grp)
-        v.setSpacing(8)
-
-        self._cb_vfd         = QCheckBox("Serial VFD")
-        self._cb_btn_jog     = QCheckBox("External Button Jogging")
-        self._cb_mpg         = QCheckBox("External MPG Jogging")
-        self._cb_feed_ovr    = QCheckBox("External Feed Override")
-        self._cb_max_vel_ovr = QCheckBox("Max Velocity Override")
-        self._cb_spindle_ovr = QCheckBox("Spindle Override")
-        self._cb_usb_jog     = QCheckBox("USB Jogging")
-
-        for cb in [self._cb_vfd, self._cb_btn_jog, self._cb_mpg,
-                   self._cb_feed_ovr, self._cb_max_vel_ovr,
-                   self._cb_spindle_ovr, self._cb_usb_jog]:
-            v.addWidget(cb)
-
-        v.addStretch()
-        return grp
-
-    # ── Right panel — tabbed detail ───────────────────────────────────────────
-    def _build_right_tabs(self) -> QTabWidget:
-        self._tabs = QTabWidget()
-
-        self._tabs.addTab(self._build_tab_vfd(),        "VFD")
-        self._tabs.addTab(self._build_tab_btn_jog(),    "Button Jog")
-        self._tabs.addTab(self._build_tab_mpg(),        "MPG")
-        self._tabs.addTab(self._build_tab_joy_jog(),    "Joy Jog")
-        self._tabs.addTab(self._build_tab_fo(),         "FO")
-        self._tabs.addTab(self._build_tab_mvo(),        "MVO")
-        self._tabs.addTab(self._build_tab_so(),         "SO")
-        self._tabs.addTab(self._build_tab_text(),       "Text")
-
-        # Wire checkboxes to enable/disable tabs
-        self._cb_vfd.toggled.connect(
-            lambda en: self._tabs.setTabEnabled(0, en))
-        self._cb_btn_jog.toggled.connect(
-            lambda en: self._tabs.setTabEnabled(1, en))
-        self._cb_mpg.toggled.connect(
-            lambda en: self._tabs.setTabEnabled(2, en))
-        self._cb_usb_jog.toggled.connect(
-            lambda en: self._tabs.setTabEnabled(3, en))
-        self._cb_feed_ovr.toggled.connect(
-            lambda en: self._tabs.setTabEnabled(4, en))
-        self._cb_max_vel_ovr.toggled.connect(
-            lambda en: self._tabs.setTabEnabled(5, en))
-        self._cb_spindle_ovr.toggled.connect(
-            lambda en: self._tabs.setTabEnabled(6, en))
-
-        # Disable all detail tabs initially
-        for i in range(7):
-            self._tabs.setTabEnabled(i, False)
-
-        return self._tabs
-
-    # Tab: VFD ─────────────────────────────────────────────────────────────────
-    def _build_tab_vfd(self) -> QWidget:
-        w = QWidget()
-        g = QGridLayout(w)
-        g.setContentsMargins(16, 16, 16, 16)
-        g.setHorizontalSpacing(16)
-        g.setVerticalSpacing(10)
-
-        self._vfd_driver = QComboBox()
-        self._vfd_driver.addItems(self.VFD_DRIVERS)
-        g.addWidget(QLabel("VFD Driver:"), 0, 0)
-        g.addWidget(self._vfd_driver, 0, 1)
-
-        hint = QLabel(
-            "gs2: Automation Direct GS2 series\n"
-            "vfs11: Toshiba VFS11\n"
-            "hy_vfd: Huanyang VFD\n"
-            "abb_badvfd: ABB VFD (bad)\n"
-            "smc_gs2: SMC clone of GS2"
-        )
-        hint.setStyleSheet(_HINT)
-        g.addWidget(hint, 1, 0, 1, 2)
-        g.setRowStretch(2, 1)
-        return w
-
-    # Tab: Button Jog ──────────────────────────────────────────────────────────
-    def _build_tab_btn_jog(self) -> QWidget:
-        w = QWidget()
-        v = QVBoxLayout(w)
-        v.setContentsMargins(16, 16, 16, 16)
-        v.addWidget(QLabel("External button jogging uses digital inputs"))
-        v.addWidget(QLabel("configured on the connectors page."))
-        info = QLabel("Assign 'jog+' and 'jog-' signals on the I/O connector page.")
-        info.setStyleSheet(_HINT)
-        info.setWordWrap(True)
-        v.addWidget(info)
-        v.addStretch()
-        return w
-
-    # Tab: MPG ─────────────────────────────────────────────────────────────────
-    def _build_tab_mpg(self) -> QWidget:
-        w = QWidget()
-        g = QGridLayout(w)
-        g.setContentsMargins(16, 16, 16, 16)
-        g.setHorizontalSpacing(16)
-        g.setVerticalSpacing(10)
-
-        self._mpg_increments = QLineEdit()
-        self._mpg_increments.setPlaceholderText("0.1 0.01 0.001")
-        self._mpg_increments.setToolTip(
-            "Space-separated step sizes for MPG. "
-            "Each click of the MPG wheel moves by the selected increment."
-        )
-        g.addWidget(QLabel("MPG Increments:"), 0, 0)
-        g.addWidget(self._mpg_increments, 0, 1)
-
-        hint = QLabel(
-            "MPG (Manual Pulse Generator) uses a quadrature encoder input.\n"
-            "Assign 'mpg-a' and 'mpg-b' signals on the connector page."
-        )
-        hint.setStyleSheet(_HINT)
-        hint.setWordWrap(True)
-        g.addWidget(hint, 1, 0, 1, 2)
-        g.setRowStretch(2, 1)
-        return w
-
-    # Tab: Joy Jog (USB) ───────────────────────────────────────────────────────
-    def _build_tab_joy_jog(self) -> QWidget:
-        w = QWidget()
-        v = QVBoxLayout(w)
-        v.setContentsMargins(16, 16, 16, 16)
-        lbl = QLabel(
-            "USB joystick jogging uses the LinuxCNC input component.\n"
-            "Configure axis mappings in the generated HAL file."
-        )
-        lbl.setWordWrap(True)
-        v.addWidget(lbl)
-        v.addStretch()
-        return w
-
-    # Tab: FO (Feed Override) ──────────────────────────────────────────────────
-    def _build_tab_fo(self) -> QWidget:
-        w = QWidget()
-        v = QVBoxLayout(w)
-        v.setContentsMargins(16, 16, 16, 16)
-        lbl = QLabel(
-            "External Feed Override uses an analog or encoder input.\n"
-            "Assign the 'feed-override' signal on the connector page."
-        )
-        lbl.setWordWrap(True)
-        v.addWidget(lbl)
-        v.addStretch()
-        return w
-
-    # Tab: MVO (Max Velocity Override) ─────────────────────────────────────────
-    def _build_tab_mvo(self) -> QWidget:
-        w = QWidget()
-        v = QVBoxLayout(w)
-        v.setContentsMargins(16, 16, 16, 16)
-        lbl = QLabel(
-            "External Max Velocity Override uses an analog or encoder input.\n"
-            "Assign the 'max-velocity-override' signal on the connector page."
-        )
-        lbl.setWordWrap(True)
-        v.addWidget(lbl)
-        v.addStretch()
-        return w
-
-    # Tab: SO (Spindle Override) ───────────────────────────────────────────────
-    def _build_tab_so(self) -> QWidget:
-        w = QWidget()
-        v = QVBoxLayout(w)
-        v.setContentsMargins(16, 16, 16, 16)
-        lbl = QLabel(
-            "External Spindle Override uses an analog or encoder input.\n"
-            "Assign the 'spindle-override' signal on the connector page."
-        )
-        lbl.setWordWrap(True)
-        v.addWidget(lbl)
-        v.addStretch()
-        return w
-
-    # Tab: Text (notes / HAL snippet preview) ──────────────────────────────────
-    def _build_tab_text(self) -> QWidget:
-        w = QWidget()
-        v = QVBoxLayout(w)
-        v.setContentsMargins(16, 16, 16, 16)
-        lbl = QLabel(
-            "Enable controls on the left to configure each device.\n"
-            "HAL snippets are generated automatically when the config is exported."
-        )
-        lbl.setWordWrap(True)
-        v.addWidget(lbl)
-        v.addStretch()
-        return w
-
-    # ── populate / save ───────────────────────────────────────────────────────
-    def populate(self, cfg: MachineConfig):
-        e = cfg.external
-
-        self._cb_vfd.setChecked(e.use_serial_vfd)
-        self._cb_btn_jog.setChecked(e.use_ext_button_jogging)
-        self._cb_mpg.setChecked(e.use_mpg)
-        self._cb_feed_ovr.setChecked(e.use_feed_override)
-        self._cb_max_vel_ovr.setChecked(e.use_max_vel_override)
-        self._cb_spindle_ovr.setChecked(e.use_spindle_override)
-        self._cb_usb_jog.setChecked(e.use_usb_jogging)
-
-        self._vfd_driver.setCurrentText(e.vfd.driver)
-        self._mpg_increments.setText(e.mpg.increments)
-
-    def save(self, cfg: MachineConfig):
-        e = cfg.external
-
-        e.use_serial_vfd        = self._cb_vfd.isChecked()
-        e.use_ext_button_jogging = self._cb_btn_jog.isChecked()
-        e.use_mpg               = self._cb_mpg.isChecked()
-        e.use_feed_override     = self._cb_feed_ovr.isChecked()
-        e.use_max_vel_override  = self._cb_max_vel_ovr.isChecked()
-        e.use_spindle_override  = self._cb_spindle_ovr.isChecked()
-        e.use_usb_jogging       = self._cb_usb_jog.isChecked()
-
-        e.vfd.enabled           = e.use_serial_vfd
-        e.vfd.driver            = self._vfd_driver.currentText()
-        e.mpg.enabled           = e.use_mpg
-        e.mpg.increments        = self._mpg_increments.text().strip() or "0.1 0.01 0.001"
-
-        # Keep legacy fields in sync
-        cfg.spindle.vfd_type    = e.vfd.driver if e.use_serial_vfd else "none"
-        e.use_ext_jogging       = e.use_ext_button_jogging
-        e.mpg_increments        = e.mpg.increments
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# MESA CARD CONFIGURATION PAGE  (unchanged from original — preserved as-is)
-# ─────────────────────────────────────────────────────────────────────────────
-
-class MesaConfigPage(BasePage):
-    PAGE_TITLE    = "Mesa Card Configuration"
-    PAGE_SUBTITLE = "Configure Mesa FPGA board firmware and signal parameters"
-
-    FIRMWARES = {
-        "5i25":  ["5i25_prob_rf.bit", "5i25_sserial.bit", "5i25_t7i76d.bit"],
-        "7i76e": ["7i76e.bit", "7i76e_7i76.bit"],
-        "7i92":  ["7i92_5abcg20.bit", "7i92_7i76x2.bit"],
-        "7i96":  ["7i96.bit", "7i96_s.bit"],
-    }
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self._build_ui()
-
-    def _build_ui(self):
-        root = QVBoxLayout(self)
-        root.setContentsMargins(32, 24, 32, 24)
-        root.setSpacing(16)
-
-        hw_group = QGroupBox("Board & Firmware")
-        hw_grid = QGridLayout(hw_group)
-        hw_grid.setHorizontalSpacing(16)
-        hw_grid.setVerticalSpacing(10)
+        # ── Board & Firmware ─────────────────────────────────────────────────
+        fw_grp = QGroupBox("Board Firmware")
+        fw_grid = QGridLayout(fw_grp)
+        fw_grid.setHorizontalSpacing(16)
+        fw_grid.setVerticalSpacing(10)
 
         self._board = QComboBox()
-        self._board.addItems(["5i25", "6i25", "7i76e", "7i92", "7i96", "7i96S"])
-        self._board.currentTextChanged.connect(self._update_firmware_list)
-        hw_grid.addWidget(QLabel("Board Name:"), 0, 0)
-        hw_grid.addWidget(self._board, 0, 1)
+        self._board.addItems(get_all_boards())
+        fw_grid.addWidget(QLabel("Board Name:"), 0, 0)
+        fw_grid.addWidget(self._board, 0, 1)
 
         self._firmware = QComboBox()
         self._firmware.setEditable(True)
-        hw_grid.addWidget(QLabel("Firmware:"), 1, 0)
-        hw_grid.addWidget(self._firmware, 1, 1)
+        fw_grid.addWidget(QLabel("Firmware:"), 1, 0)
+        fw_grid.addWidget(self._firmware, 1, 1)
 
-        root.addWidget(hw_group)
+        self._fw_desc = QLabel("")
+        self._fw_desc.setStyleSheet("color: #81A1C1; font-size: 8.5pt; font-style: italic;")
+        self._fw_desc.setWordWrap(True)
+        fw_grid.addWidget(self._fw_desc, 2, 0, 1, 2)
 
-        freq_group = QGroupBox("Signal Frequencies")
-        freq_grid = QGridLayout(freq_group)
+        # Card Address (IP for Ethernet boards, PCIe slot for PCI)
+        self._card_addr = QLineEdit("192.168.1.121")
+        self._card_addr.setPlaceholderText("e.g. 192.168.1.121  (Ethernet) or  0  (PCI)")
+        self._card_addr.setToolTip(
+            "For Ethernet boards: the IP address of the Mesa card.\n"
+            "For PCI boards: the PCI slot index (usually 0).")
+        fw_grid.addWidget(QLabel("Card Address:"), 3, 0)
+        fw_grid.addWidget(self._card_addr, 3, 1)
+
+        self._board.currentTextChanged.connect(self._on_board_changed)
+        self._firmware.currentTextChanged.connect(self._on_firmware_changed)
+        self._board.currentTextChanged.connect(self._on_board_type_changed)
+
+        root.addWidget(fw_grp)
+
+        # ── Signal Frequencies ───────────────────────────────────────────────
+        freq_grp = QGroupBox("Signal Frequencies")
+        freq_grid = QGridLayout(freq_grp)
         freq_grid.setHorizontalSpacing(16)
         freq_grid.setVerticalSpacing(10)
 
         self._pwm_freq = QSpinBox()
-        self._pwm_freq.setRange(1000, 1000000)
-        self._pwm_freq.setValue(100000)
+        self._pwm_freq.setRange(1_000, 1_000_000)
+        self._pwm_freq.setSingleStep(1000)
+        self._pwm_freq.setValue(100_000)
         self._pwm_freq.setSuffix(" Hz")
+        self._pwm_freq.setToolTip(
+            "PWM carrier frequency used by hm2 pwmgen instances.\n"
+            "Higher = smoother but more CPU load. Typical: 20 kHz–100 kHz."
+        )
         freq_grid.addWidget(QLabel("PWM Base Frequency:"), 0, 0)
         freq_grid.addWidget(self._pwm_freq, 0, 1)
 
         self._pdm_freq = QSpinBox()
-        self._pdm_freq.setRange(1000000, 100000000)
-        self._pdm_freq.setSingleStep(1000000)
-        self._pdm_freq.setValue(6000000)
+        self._pdm_freq.setRange(1_000_000, 100_000_000)
+        self._pdm_freq.setSingleStep(1_000_000)
+        self._pdm_freq.setValue(6_000_000)
         self._pdm_freq.setSuffix(" Hz")
+        self._pdm_freq.setToolTip(
+            "PDM (Pulse Density Modulation) base frequency.\n"
+            "Used when pwmgen mode is set to PDM. Typical: 6 MHz."
+        )
         freq_grid.addWidget(QLabel("PDM Base Frequency:"), 1, 0)
         freq_grid.addWidget(self._pdm_freq, 1, 1)
 
         self._watchdog = QDoubleSpinBox()
-        self._watchdog.setRange(1.0, 1000.0)
+        self._watchdog.setRange(1.0, 5000.0)
         self._watchdog.setValue(10.0)
         self._watchdog.setSuffix(" ms")
         self._watchdog.setDecimals(1)
+        self._watchdog.setToolTip(
+            "FPGA hardware watchdog timeout.\n"
+            "If the host PC does not service the card within this window, "
+            "outputs are forced safe. Must be > servo period × 1.5."
+        )
         freq_grid.addWidget(QLabel("Watchdog Timeout:"), 2, 0)
         freq_grid.addWidget(self._watchdog, 2, 1)
 
-        root.addWidget(freq_group)
+        root.addWidget(freq_grp)
 
-        ch_group = QGroupBox("Channel Counts")
-        ch_grid = QGridLayout(ch_group)
-        ch_grid.setHorizontalSpacing(16)
+        # ── Channel Counts ───────────────────────────────────────────────────
+        ch_grp = QGroupBox("Channel Counts")
+        ch_grid = QGridLayout(ch_grp)
+        ch_grid.setHorizontalSpacing(24)
         ch_grid.setVerticalSpacing(10)
 
-        self._encoders = QSpinBox(); self._encoders.setRange(0, 32); self._encoders.setValue(1)
-        ch_grid.addWidget(QLabel("Encoders:"), 0, 0); ch_grid.addWidget(self._encoders, 0, 1)
+        def _spin(lo, hi, val, tip=""):
+            s = QSpinBox()
+            s.setRange(lo, hi)
+            s.setValue(val)
+            if tip:
+                s.setToolTip(tip)
+            return s
 
-        self._stepgens = QSpinBox(); self._stepgens.setRange(0, 32); self._stepgens.setValue(5)
-        ch_grid.addWidget(QLabel("Step Generators:"), 1, 0); ch_grid.addWidget(self._stepgens, 1, 1)
+        self._encoders   = _spin(0, 32, 1, "Quadrature encoder count allocated in firmware.")
+        self._stepgens   = _spin(0, 32, 5, "Step/dir generator count allocated in firmware.")
+        self._pwmgens    = _spin(0, 16, 0, "PWM generator count allocated in firmware.")
+        self._sserial_n  = _spin(0,  8, 0, "Smart Serial port count.")
+        self._ss_chans   = _spin(1,  8, 2, "Smart Serial channels per port.")
 
-        self._smart_serial = QSpinBox(); self._smart_serial.setRange(0, 8)
-        ch_grid.addWidget(QLabel("Smart Serial Ports:"), 2, 0); ch_grid.addWidget(self._smart_serial, 2, 1)
+        self._enc_limit_lbl  = QLabel("")
+        self._sg_limit_lbl   = QLabel("")
+        self._pwm_limit_lbl  = QLabel("")
+        self._ss_limit_lbl   = QLabel("")
+        for lbl in [self._enc_limit_lbl, self._sg_limit_lbl,
+                    self._pwm_limit_lbl, self._ss_limit_lbl]:
+            lbl.setStyleSheet("color: #4C566A; font-size: 8pt;")
 
-        root.addWidget(ch_group)
+        ch_grid.addWidget(QLabel("Encoders:"),           0, 0)
+        ch_grid.addWidget(self._encoders,                0, 1)
+        ch_grid.addWidget(self._enc_limit_lbl,           0, 2)
+
+        ch_grid.addWidget(QLabel("Step Generators:"),    1, 0)
+        ch_grid.addWidget(self._stepgens,                1, 1)
+        ch_grid.addWidget(self._sg_limit_lbl,            1, 2)
+
+        ch_grid.addWidget(QLabel("PWM Generators:"),     2, 0)
+        ch_grid.addWidget(self._pwmgens,                 2, 1)
+        ch_grid.addWidget(self._pwm_limit_lbl,           2, 2)
+
+        ch_grid.addWidget(QLabel("Smart Serial Ports:"), 3, 0)
+        ch_grid.addWidget(self._sserial_n,               3, 1)
+        ch_grid.addWidget(self._ss_limit_lbl,            3, 2)
+
+        ch_grid.addWidget(QLabel("SS Channels/Port:"),   4, 0)
+        ch_grid.addWidget(self._ss_chans,                4, 1)
+
+        root.addWidget(ch_grp)
+
+        # ── Smart Serial Device Allocation ───────────────────────────────────
+        self._ss_grp = QGroupBox("Smart Serial Device Allocation")
+        ss_layout = QVBoxLayout(self._ss_grp)
+
+        ss_top = QHBoxLayout()
+        ss_top.addWidget(QLabel("Channels:"))
+        ss_top.addWidget(self._ss_chans)
+        ss_top.addStretch()
+        ss_layout.addLayout(ss_top)
+
+        self._ss_table = QTableWidget(0, 3)
+        self._ss_table.setHorizontalHeaderLabels(["Channel", "Device Type", "Address"])
+        hdr = self._ss_table.horizontalHeader()
+        hdr.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
+        hdr.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        hdr.setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)
+        self._ss_table.setColumnWidth(0, 70)
+        self._ss_table.setColumnWidth(2, 70)
+        self._ss_table.verticalHeader().setVisible(False)
+        self._ss_table.setMaximumHeight(160)
+        ss_layout.addWidget(self._ss_table)
+        self._ss_grp.setVisible(False)
+
+        self._sserial_n.valueChanged.connect(self._on_sserial_count_changed)
+        self._ss_chans.valueChanged.connect(self._rebuild_ss_table)
+
+        root.addWidget(self._ss_grp)
+
+        # ── Sanity Checks ────────────────────────────────────────────────────
+        san_grp = QGroupBox("Sanity Checks")
+        san_grid = QGridLayout(san_grp)
+        san_grid.setHorizontalSpacing(24)
+        san_grid.setVerticalSpacing(6)
+        hint = QLabel(
+            "Click on each page tab to configure signal names for each connector port.\n"
+            "Tabbed pages accept the changes. Figure signal names for each connector port."
+        )
+        hint.setStyleSheet("color: #4C566A; font-size: 8.5pt;")
+        hint.setWordWrap(True)
+        san_grid.addWidget(hint, 0, 0, 1, 2)
+
+        self._cb_7i29 = QCheckBox("7i29 daughter board")
+        self._cb_7i30 = QCheckBox("7i30 daughter board")
+        self._cb_7i33 = QCheckBox("7i33 daughter board")
+        self._cb_7i40 = QCheckBox("7i40 daughter board")
+        self._cb_7i48 = QCheckBox("7i48 daughter board")
+
+        san_grid.addWidget(self._cb_7i29, 1, 0)
+        san_grid.addWidget(self._cb_7i30, 1, 1)
+        san_grid.addWidget(self._cb_7i33, 2, 0)
+        san_grid.addWidget(self._cb_7i40, 2, 1)
+        san_grid.addWidget(self._cb_7i48, 3, 0)
+
+        root.addWidget(san_grp)
         root.addStretch()
 
-        self._update_firmware_list(self._board.currentText())
+        # Wrap in scroll
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setWidget(inner)
 
-    def _update_firmware_list(self, board: str):
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.addWidget(scroll)
+
+        # Init
+        self._on_board_changed(self._board.currentText())
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Dynamic update slots
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def _on_board_type_changed(self, board: str):
+        """Update card address placeholder based on board type."""
+        eth_boards = {"7i76e", "7i92", "7i96", "7i96S"}
+        if board in eth_boards:
+            self._card_addr.setPlaceholderText("e.g. 192.168.1.121  (Ethernet)")
+        else:
+            self._card_addr.setPlaceholderText("PCI slot index, e.g.  0")
+
+    def _on_board_changed(self, board: str):
+        from config.machine_config import get_firmware_list
+        self._firmware.blockSignals(True)
         self._firmware.clear()
-        self._firmware.addItems(self.FIRMWARES.get(board, [f"{board}.bit"]))
+        self._firmware.addItems(get_firmware_list(board) or [f"{board}.bit"])
+        self._firmware.blockSignals(False)
+        self._on_firmware_changed(self._firmware.currentText())
+
+    def _on_firmware_changed(self, fw: str):
+        from config.machine_config import get_firmware_spec
+        board = self._board.currentText()
+        spec = get_firmware_spec(board, fw)
+        if spec:
+            self._fw_desc.setText(f"ℹ  {spec.description}")
+            self._enc_limit_lbl.setText(f"max {spec.max_encoders}")
+            self._sg_limit_lbl.setText(f"max {spec.max_stepgens}")
+            self._pwm_limit_lbl.setText(f"max {spec.max_pwmgens}")
+            self._ss_limit_lbl.setText(f"max {spec.max_sserials}")
+            # Clamp spinboxes silently
+            self._encoders.setMaximum(spec.max_encoders)
+            self._stepgens.setMaximum(spec.max_stepgens)
+            self._pwmgens.setMaximum(spec.max_pwmgens)
+            self._sserial_n.setMaximum(spec.max_sserials)
+        else:
+            self._fw_desc.setText("(custom firmware — limits unknown)")
+            for lbl in [self._enc_limit_lbl, self._sg_limit_lbl,
+                        self._pwm_limit_lbl, self._ss_limit_lbl]:
+                lbl.setText("")
+
+    def _on_sserial_count_changed(self, n: int):
+        self._ss_grp.setVisible(n > 0)
+        if n > 0:
+            self._rebuild_ss_table()
+
+    def _rebuild_ss_table(self):
+        """Rebuild smart serial allocation table."""
+        n_ports = self._sserial_n.value()
+        n_chans = self._ss_chans.value()
+        total   = n_ports * n_chans
+        self._ss_table.setRowCount(total)
+        row = 0
+        for port in range(n_ports):
+            for ch in range(n_chans):
+                ch_item = QTableWidgetItem(f"Port {port}, Ch {ch}")
+                ch_item.setFlags(Qt.ItemFlag.ItemIsEnabled)
+                self._ss_table.setItem(row, 0, ch_item)
+
+                dev_combo = QComboBox()
+                dev_combo.addItems(["Unused", "7i76", "7i77", "7i64", "7i84"])
+                self._ss_table.setCellWidget(row, 1, dev_combo)
+
+                addr_spin = QSpinBox()
+                addr_spin.setRange(0, 15)
+                self._ss_table.setCellWidget(row, 2, addr_spin)
+                row += 1
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # populate / save
+    # ─────────────────────────────────────────────────────────────────────────
 
     def populate(self, cfg: MachineConfig):
         m = cfg.mesa
+
+        self._board.blockSignals(True)
         self._board.setCurrentText(m.board_name)
-        self._update_firmware_list(m.board_name)
+        self._board.blockSignals(False)
+
+        self._on_board_changed(m.board_name)
+        self._on_board_type_changed(m.board_name)
+
         self._firmware.setCurrentText(m.firmware)
+        self._card_addr.setText(getattr(m, "ip_address", "192.168.1.121"))
         self._pwm_freq.setValue(m.pwm_base_freq)
         self._pdm_freq.setValue(m.pdm_base_freq)
         self._watchdog.setValue(m.watchdog_timeout)
         self._encoders.setValue(m.num_encoders)
         self._stepgens.setValue(m.num_stepgens)
-        self._smart_serial.setValue(m.num_smart_serial)
+        self._pwmgens.setValue(m.num_pwmgens)
+        self._sserial_n.setValue(m.num_smart_serial)
+        self._ss_chans.setValue(m.num_smart_serial_channels)
+
+        self._cb_7i29.setChecked(m.check_7i29)
+        self._cb_7i30.setChecked(m.check_7i30)
+        self._cb_7i33.setChecked(m.check_7i33)
+        self._cb_7i40.setChecked(m.check_7i40)
+        self._cb_7i48.setChecked(m.check_7i48)
+
+        self._on_sserial_count_changed(m.num_smart_serial)
+
+        # Restore smart serial channel allocations
+        if m.sserial_channels and self._ss_table.rowCount() > 0:
+            for i, ch_cfg in enumerate(m.sserial_channels):
+                if i >= self._ss_table.rowCount():
+                    break
+                dev_w = self._ss_table.cellWidget(i, 1)
+                adr_w = self._ss_table.cellWidget(i, 2)
+                if dev_w:
+                    dev_w.setCurrentText(ch_cfg.device)
+                if adr_w:
+                    adr_w.setValue(ch_cfg.device_address)
 
     def save(self, cfg: MachineConfig):
+        from config.machine_config import SmartSerialChannel
         m = cfg.mesa
-        m.board_name         = self._board.currentText()
-        m.firmware           = self._firmware.currentText()
-        m.pwm_base_freq      = self._pwm_freq.value()
-        m.pdm_base_freq      = self._pdm_freq.value()
-        m.watchdog_timeout   = self._watchdog.value()
-        m.num_encoders       = self._encoders.value()
-        m.num_stepgens       = self._stepgens.value()
-        m.num_smart_serial   = self._smart_serial.value()
+        m.board_name               = self._board.currentText()
+        m.firmware                 = self._firmware.currentText()
+        m.ip_address               = self._card_addr.text().strip()
+        m.pwm_base_freq            = self._pwm_freq.value()
+        m.pdm_base_freq            = self._pdm_freq.value()
+        m.watchdog_timeout         = self._watchdog.value()
+        m.num_encoders             = self._encoders.value()
+        m.num_stepgens             = self._stepgens.value()
+        m.num_pwmgens              = self._pwmgens.value()
+        m.num_smart_serial         = self._sserial_n.value()
+        m.num_smart_serial_channels = self._ss_chans.value()
+
+        m.check_7i29 = self._cb_7i29.isChecked()
+        m.check_7i30 = self._cb_7i30.isChecked()
+        m.check_7i33 = self._cb_7i33.isChecked()
+        m.check_7i40 = self._cb_7i40.isChecked()
+        m.check_7i48 = self._cb_7i48.isChecked()
+
+        # Save smart serial channel allocation
+        m.sserial_channels = []
+        for row in range(self._ss_table.rowCount()):
+            dev_w = self._ss_table.cellWidget(row, 1)
+            adr_w = self._ss_table.cellWidget(row, 2)
+            m.sserial_channels.append(SmartSerialChannel(
+                channel_num=row,
+                device=dev_w.currentText() if dev_w else "Unused",
+                device_address=adr_w.value() if adr_w else 0,
+            ))
+
+        # Update connectors for new board/firmware
+        m.update_from_firmware()
+
+    def validate(self):
+        board = self._board.currentText()
+        fw    = self._firmware.currentText()
+        if not fw:
+            return False, "No firmware selected."
+        from config.machine_config import get_firmware_spec
+        spec = get_firmware_spec(board, fw)
+        if spec is None:
+            # Custom firmware — warn but allow
+            pass
+        # Check watchdog vs a sane minimum
+        if self._watchdog.value() < 1.0:
+            return False, "Watchdog timeout must be ≥ 1.0 ms."
+        return True, ""

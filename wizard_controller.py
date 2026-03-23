@@ -40,6 +40,8 @@ from pages import (
     ScreenConfigPage, VCPPage, ExternalControlsPage, MesaConfigPage,
     ConnectorsPage, IO7i76Page, MotorConfigPage, AxisScalePage,
     AxisConfigPage, SpindleConfigPage, OptionsPage, RealtimePage,
+    StepGenAssignPage, EncoderAssignPage, GPIOAssignPage,
+    SmartSerialConfigPage, SanityCheckPage, HALPreviewPage,
     FinishPage,
 )
 
@@ -235,7 +237,7 @@ class WizardController(QMainWindow):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("PNCconf Qt Wizard — LinuxCNC Mesa Configuration")
+        self.setWindowTitle("FPGA Configuration Wizard — LinuxCNC Mesa")
         self.resize(1100, 740)
         self.setMinimumSize(860, 600)
 
@@ -264,15 +266,21 @@ class WizardController(QMainWindow):
             ("Screen Configuration",    ScreenConfigPage(),     "Display"),
             ("Virtual Control Panel",   VCPPage(),              "Display"),
             ("External Controls",       ExternalControlsPage(), "I/O"),
-            ("Mesa Card Config",        MesaConfigPage(),       "Hardware"),
+            ("FPGA Configuration",      MesaConfigPage(),       "Hardware"),
             ("Connector Pin Assign",    ConnectorsPage(),       "Hardware"),
             ("7i76 I/O Config",         IO7i76Page(),           "Hardware"),
             ("Motor Configuration",     MotorConfigPage(),      "Motion"),
             ("Axis Scale Calculation",  AxisScalePage(),        "Motion"),
             ("Axis Configuration",      AxisConfigPage(),       "Motion"),
             ("Spindle Configuration",   SpindleConfigPage(),    "Motion"),
+            ("StepGen Assignment",      StepGenAssignPage(),    "FPGA Mapping"),
+            ("Encoder Assignment",      EncoderAssignPage(),    "FPGA Mapping"),
+            ("GPIO Assignment",         GPIOAssignPage(),       "FPGA Mapping"),
+            ("Smart Serial Config",     SmartSerialConfigPage(),"FPGA Mapping"),
             ("Options",                 OptionsPage(),          "Advanced"),
             ("Realtime Components",     RealtimePage(),         "Advanced"),
+            ("Sanity Check",            SanityCheckPage(),      "Validation"),
+            ("HAL Preview",             HALPreviewPage(),       "Validation"),
             ("Finish",                  FinishPage(),           ""),
         ]
 
@@ -351,7 +359,7 @@ class WizardController(QMainWindow):
         logo_layout.setContentsMargins(16, 12, 16, 12)
         logo_layout.setSpacing(2)
 
-        title_lbl = QLabel("⚙ PNCconf")
+        title_lbl = QLabel("⚙ FPGA Wizard")
         title_font = QFont()
         title_font.setPointSize(13)
         title_font.setWeight(QFont.Weight.Bold)
@@ -487,12 +495,16 @@ class WizardController(QMainWindow):
             self._go_to(self._current_index - 1)
 
     def _finish(self):
-        """Called when Finish button is pressed on the last page."""
+        """Called when the Finish button is pressed on the last page."""
         current_page = self._steps[self._current_index].page
         current_page.save(self._cfg)
-        # The FinishPage itself handles file generation via its own buttons.
-        # Here we just ensure state is saved.
-        self.statusBar().showMessage("Configuration complete. Use the buttons above to generate files.")
+        # Delegate to FinishPage which owns the folder picker + file writer
+        if hasattr(current_page, "_generate_all"):
+            current_page._generate_all()
+        else:
+            self.statusBar().showMessage(
+                "Configuration complete. Use the Generate buttons to save files."
+            )
 
     # ─────────────────────────────────────────────────────────────────────────
     # Sidebar sync helpers
