@@ -237,7 +237,7 @@ class WizardController(QMainWindow):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("FPGA Configuration Wizard — LinuxCNC Mesa")
+        self.setWindowTitle("FPGA Configuration Wizard — meukron  |  LinuxCNC Mesa")
         self.resize(1100, 740)
         self.setMinimumSize(860, 600)
 
@@ -366,10 +366,21 @@ class WizardController(QMainWindow):
         title_lbl.setFont(title_font)
         title_lbl.setStyleSheet("color: #5E81AC;")
 
-        ver_lbl = QLabel("Qt Wizard  v1.0")
-        ver_lbl.setStyleSheet("color: #4C566A; font-size: 8pt;")
+        # ── Operator / machine owner badge ────────────────────────────────
+        self._operator_lbl = QLabel("👤  meukron")
+        self._operator_lbl.setStyleSheet(
+            "color: #A3BE8C;"
+            "font-size: 9pt;"
+            "font-weight: 700;"
+            "letter-spacing: 0.5px;"
+        )
 
+        ver_lbl = QLabel("Qt Wizard  v1.0  |  Belagavi, KA")
+        ver_lbl.setStyleSheet("color: #4C566A; font-size: 7.5pt;")
+
+        logo_area.setFixedHeight(95)          # slightly taller for 3 lines
         logo_layout.addWidget(title_lbl)
+        logo_layout.addWidget(self._operator_lbl)
         logo_layout.addWidget(ver_lbl)
         layout.addWidget(logo_area)
 
@@ -384,8 +395,10 @@ class WizardController(QMainWindow):
         bottom_area.setStyleSheet("border-top: 1px solid #3A3A50;")
         bottom_layout = QVBoxLayout(bottom_area)
         bottom_layout.setContentsMargins(16, 8, 16, 8)
-        bottom_lbl = QLabel("LinuxCNC 2.9+  |  Mesa FPGA")
-        bottom_lbl.setStyleSheet("color: #4C566A; font-size: 8pt;")
+        bottom_lbl = QLabel("meukron  |  LinuxCNC 2.9+  |  Mesa FPGA")
+        bottom_lbl.setStyleSheet(
+            "color: #4C566A; font-size: 7.5pt; font-weight: 600;"
+        )
         bottom_layout.addWidget(bottom_lbl)
         layout.addWidget(bottom_area)
 

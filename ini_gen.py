@@ -40,8 +40,14 @@ class INIGenerator:
             f"MAX_SPINDLE_OVERRIDE = {c.screen.max_spindle_override:.2f}",
             f"EDITOR = {c.screen.editor}",
             f"INCREMENTS = {c.screen.increments}",
-            "",
         ]
+        # Only written when the user has selected a custom panel in the wizard
+        if c.control_panel.is_configured:
+            lines += [
+                f"PANEL_NAME = {c.control_panel.panel_name}",
+                f"PANEL_PATH = {c.control_panel.panel_path}",
+            ]
+        lines.append("")
 
         # ── FILTER ───────────────────────────────────────────────────────────
         lines += [

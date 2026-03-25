@@ -6,6 +6,7 @@ try:
         QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QLineEdit,
         QComboBox, QDoubleSpinBox, QGroupBox, QSpinBox, QCheckBox,
         QScrollArea, QFrame, QWidget,
+        QPushButton, QDialog, QDialogButtonBox, QFileDialog, QMessageBox,
     )
     from PyQt6.QtCore import Qt
 except ImportError:
@@ -13,20 +14,116 @@ except ImportError:
         QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QLineEdit,
         QComboBox, QDoubleSpinBox, QGroupBox, QSpinBox, QCheckBox,
         QScrollArea, QFrame, QWidget,
+        QPushButton, QDialog, QDialogButtonBox, QFileDialog, QMessageBox,
     )
     from PySide6.QtCore import Qt
 
 from pages.base_page import BasePage
-from config.machine_config import MachineConfig
+from config.machine_config import MachineConfig, ControlPanelConfig
 
 _HINT = "color: #4C566A; font-size: 8.5pt;"
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Minimal dialog: collect panel name + path from the user
+# ─────────────────────────────────────────────────────────────────────────────
+
+class _AddPanelDialog(QDialog):
+    """Collects a panel name and a file/directory path.
+
+    All data stays in memory — no files are written.
+    Returns a populated ControlPanelConfig on accept().
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Add Control Panel")
+        self.setMinimumWidth(420)
+
+        lay = QVBoxLayout(self)
+        lay.setSpacing(10)
+
+        form = QGridLayout()
+        form.setHorizontalSpacing(12)
+        form.setVerticalSpacing(8)
+        form.setColumnStretch(1, 1)
+
+        # Panel Name
+        self._name = QLineEdit()
+        self._name.setPlaceholderText("e.g. my_panel")
+        form.addWidget(QLabel("Panel Name:"), 0, 0)
+        form.addWidget(self._name, 0, 1)
+
+        # Panel Path + browse button
+        self._path = QLineEdit()
+        self._path.setPlaceholderText("/path/to/panel.ui  or  /path/to/panel/dir")
+        browse_btn = QPushButton("Browse…")
+        browse_btn.setFixedWidth(72)
+        browse_btn.clicked.connect(self._browse)
+        path_row = QHBoxLayout()
+        path_row.setSpacing(6)
+        path_row.addWidget(self._path)
+        path_row.addWidget(browse_btn)
+        form.addWidget(QLabel("Panel Path:"), 1, 0)
+        form.addLayout(path_row, 1, 1)
+
+        hint = QLabel("Point to a .ui file, a .py handler, or the panel directory.")
+        hint.setStyleSheet(_HINT)
+        form.addWidget(hint, 2, 0, 1, 2)
+
+        lay.addLayout(form)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(self._on_accept)
+        buttons.rejected.connect(self.reject)
+        lay.addWidget(buttons)
+
+    def _browse(self):
+        """Let the user pick a file or directory."""
+        path = QFileDialog.getExistingDirectory(self, "Select Panel Directory")
+        if not path:
+            path, _ = QFileDialog.getOpenFileName(
+                self, "Select Panel File", "",
+                "Panel Files (*.ui *.py);;All Files (*)"
+            )
+        if path:
+            self._path.setText(path)
+
+    def _on_accept(self):
+        name = self._name.text().strip()
+        path = self._path.text().strip()
+        if not name or not path:
+            QMessageBox.warning(self, "Incomplete", "Both Panel Name and Panel Path are required.")
+            return
+        self.accept()
+
+    def result_config(self) -> ControlPanelConfig:
+        """Call after exec() returns Accepted."""
+        return ControlPanelConfig(
+            panel_name=self._name.text().strip(),
+            panel_path=self._path.text().strip(),
+        )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Main page
+# ─────────────────────────────────────────────────────────────────────────────
 
 class ScreenConfigPage(BasePage):
     PAGE_TITLE    = "Screen Configuration"
     PAGE_SUBTITLE = "Configure the LinuxCNC GUI type and display parameters"
 
-    GUI_TYPES = ["axis", "gmoccapy", "touchy", "qtplasmac", "gscreen", "ngcgui"]
+    GUI_TYPES = [
+        "axis",
+        "gmoccapy",
+        "touchy",
+        "qtplasmac",
+        "gscreen",
+        "ngcgui",
+        "qtvcp my_panel",    # meukron custom QtVCP panel
+    ]
     EDITORS   = ["gedit", "nano", "mousepad", "xed", "kate", "vi"]
 
     def __init__(self, parent=None):
@@ -44,6 +141,7 @@ class ScreenConfigPage(BasePage):
         root.setSpacing(16)
 
         root.addWidget(self._build_gui_group())
+        root.addWidget(self._build_panel_group())      # ← control panel selection
         root.addWidget(self._build_overrides_group())
         root.addWidget(self._build_velocity_group())
         root.addWidget(self._build_editor_group())
@@ -70,7 +168,8 @@ class ScreenConfigPage(BasePage):
 
         hint = QLabel(
             "axis: classic full-featured  |  gmoccapy: touch-screen  |  "
-            "touchy: minimal touch  |  qtplasmac: plasma cutting"
+            "touchy: minimal touch  |  qtplasmac: plasma cutting  |  "
+            "qtvcp my_panel: meukron custom panel"
         )
         hint.setWordWrap(True)
         hint.setStyleSheet(_HINT)
@@ -95,6 +194,50 @@ class ScreenConfigPage(BasePage):
         g.addWidget(self._display_geometry, 4, 1)
 
         return grp
+
+    # ── Control Panel Selection ───────────────────────────────────────────────
+    def _build_panel_group(self) -> QGroupBox:
+        """Minimal group: dropdown of user-added panels + 'Add New Panel' button.
+
+        The panel list is EMPTY at startup and lives only in memory for the
+        duration of the wizard session.  Each entry is a ControlPanelConfig
+        stored in self._panel_registry (list).
+        """
+        self._panel_registry: list[ControlPanelConfig] = []   # in-memory store
+
+        grp = QGroupBox("Control Panel")
+        g = QGridLayout(grp)
+        g.setHorizontalSpacing(16)
+        g.setVerticalSpacing(10)
+        g.setColumnStretch(1, 1)
+
+        self._panel_combo = QComboBox()
+        self._panel_combo.addItem("(none)")          # default — no panel selected
+        g.addWidget(QLabel("Selected Panel:"), 0, 0)
+        g.addWidget(self._panel_combo, 0, 1)
+
+        add_btn = QPushButton("Add New Panel…")
+        add_btn.setFixedWidth(130)
+        add_btn.clicked.connect(self._on_add_panel)
+        g.addWidget(add_btn, 0, 2)
+
+        hint = QLabel(
+            "Add a custom QtVCP panel.  Leave as '(none)' to use the default GUI."
+        )
+        hint.setWordWrap(True)
+        hint.setStyleSheet(_HINT)
+        g.addWidget(hint, 1, 0, 1, 3)
+
+        return grp
+
+    def _on_add_panel(self):
+        dlg = _AddPanelDialog(self)
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            panel = dlg.result_config()
+            self._panel_registry.append(panel)
+            self._panel_combo.addItem(panel.panel_name)
+            # Auto-select the panel just added
+            self._panel_combo.setCurrentIndex(self._panel_combo.count() - 1)
 
     # ── Override Limits ───────────────────────────────────────────────────────
     def _build_overrides_group(self) -> QGroupBox:
@@ -257,6 +400,19 @@ class ScreenConfigPage(BasePage):
         self._win_y.setValue(sc.window_y)
         self._force_maximize.setChecked(sc.force_maximize)
 
+        # Restore panel selection if a panel was already configured on this cfg
+        # (e.g. wizard navigated back to this page during the same session)
+        cp = cfg.control_panel
+        if cp.is_configured:
+            # Add to registry if not already present (back-navigation scenario)
+            known = [p.panel_name for p in self._panel_registry]
+            if cp.panel_name not in known:
+                self._panel_registry.append(ControlPanelConfig(cp.panel_name, cp.panel_path))
+                self._panel_combo.addItem(cp.panel_name)
+            idx = self._panel_combo.findText(cp.panel_name)
+            if idx >= 0:
+                self._panel_combo.setCurrentIndex(idx)
+
     def save(self, cfg: MachineConfig):
         sc = cfg.screen
 
@@ -287,3 +443,17 @@ class ScreenConfigPage(BasePage):
 
         # Keep legacy geometry string in sync
         sc.geometry = f"{sc.window_width}x{sc.window_height}+{sc.window_x}+{sc.window_y}"
+
+        # ── Control panel ────────────────────────────────────────────────────
+        selected_name = self._panel_combo.currentText()
+        matched = next(
+            (p for p in self._panel_registry if p.panel_name == selected_name),
+            None,
+        )
+        if matched:
+            cfg.control_panel.panel_name = matched.panel_name
+            cfg.control_panel.panel_path = matched.panel_path
+        else:
+            # "(none)" or nothing selected — clear any previously stored value
+            cfg.control_panel.panel_name = ""
+            cfg.control_panel.panel_path = ""

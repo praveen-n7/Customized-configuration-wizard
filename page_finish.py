@@ -71,6 +71,12 @@ class _GenerateWorker(QThread):
                 self._out_dir, "pncconf.json")
             self._cfg.save(json_path)
 
+            # Create empty .pref file named after the machine/config.
+            # Overwrites safely if it already exists.
+            pref_path = os.path.join(
+                self._out_dir, f"{self._cfg.machine_name}.pref")
+            open(pref_path, "w").close()
+
             self.progress.emit("Done.")
             self.finished.emit(True, self._out_dir)
 
@@ -295,6 +301,7 @@ class FinishPage(BasePage):
             "║  FPGA CONFIGURATION WIZARD  —  SUMMARY" + " " * 14 + "║",
             "╚" + "═" * 54 + "╝",
             "",
+            f"  Operator         : meukron  (Belagavi, KA)",
             f"  Machine Name     : {cfg.machine_name}",
             f"  Config Directory : {cfg.config_directory or '(not set)'}",
             f"  Axis Config      : {cfg.axis_config}",

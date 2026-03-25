@@ -73,7 +73,7 @@ class BaseMachineInfoPage(BasePage):
         g.setVerticalSpacing(10)
 
         self._machine_name = QLineEdit()
-        self._machine_name.setPlaceholderText("my_lathe")
+        self._machine_name.setPlaceholderText("meukron")
         g.addWidget(QLabel("Machine Name:"), 0, 0)
         g.addWidget(self._machine_name, 0, 1)
 

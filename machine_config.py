@@ -457,7 +457,7 @@ class MachineOptionsConfig:
 
 @dataclass
 class ScreenConfig:
-    gui_type: str = "axis"
+    gui_type: str = "qtvcp my_panel"   # meukron default
     position_offset: str = "relative"
     position_feedback: str = "actual"
     display_geometry: str = "xyz"
@@ -478,6 +478,27 @@ class ScreenConfig:
     window_y: int = 0
     force_maximize: bool = False
     geometry: str = "800x600+0+0"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Control Panel (custom GUI panel selection — in-memory only during session)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@dataclass
+class ControlPanelConfig:
+    """Holds user-selected custom GUI panel data.
+
+    Not persisted anywhere except through the generated INI file
+    (PANEL_NAME / PANEL_PATH keys inside [DISPLAY]).  No JSON or
+    external files are involved.
+    """
+    panel_name: str = ""   # human label, e.g. "my_panel"
+    panel_path: str = ""   # absolute path to panel file or directory
+
+    @property
+    def is_configured(self) -> bool:
+        """True only when both fields carry non-blank values."""
+        return bool(self.panel_name.strip() and self.panel_path.strip())
 
 
 @dataclass
@@ -620,8 +641,8 @@ class IOConfig:
 
 @dataclass
 class MachineConfig:
-    machine_name: str = "my_LinuxCNC_machine"
-    config_directory: str = os.path.expanduser("~/linuxcnc/configs/my_LinuxCNC_machine")
+    machine_name: str = "meukron"
+    config_directory: str = os.path.expanduser("~/linuxcnc/configs/meukron")
     config_type: str = "new"
     axis_config: str = "XYZ"
     include_spindle: bool = True
@@ -639,6 +660,7 @@ class MachineConfig:
     realtime: RealtimeConfig = field(default_factory=RealtimeConfig)
     spindle: SpindleConfig = field(default_factory=SpindleConfig)
     io: IOConfig = field(default_factory=IOConfig)
+    control_panel: ControlPanelConfig = field(default_factory=ControlPanelConfig)
     axes: Dict[str, AxisConfig] = field(default_factory=lambda: {
         "X": AxisConfig(name="X"),
         "Y": AxisConfig(name="Y"),
@@ -692,6 +714,10 @@ class MachineConfig:
         }
         if v.include_pyvcp and v.pyvcp_file:
             ini["DISPLAY"]["PYVCP"] = v.pyvcp_file
+        # Control panel — only written when the user has explicitly configured one
+        if self.control_panel.is_configured:
+            ini["DISPLAY"]["PANEL_NAME"] = self.control_panel.panel_name
+            ini["DISPLAY"]["PANEL_PATH"] = self.control_panel.panel_path
 
         ini["TRAJ"] = {
             "AXES": str(len(self.axis_config)),
